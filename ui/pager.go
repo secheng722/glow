@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	statusBarHeight = 1
+	statusBarHeight = 0
 	lineNumberWidth = 4
 )
 
@@ -307,7 +307,7 @@ func (m pagerModel) View() string {
 	fmt.Fprint(&b, m.viewport.View()+"\n")
 
 	// Footer
-	m.statusBarView(&b)
+	//m.statusBarView(&b)
 
 	if m.showHelp {
 		fmt.Fprint(&b, "\n"+m.helpView())
@@ -476,6 +476,8 @@ func glamourRender(m pagerModel, markdown string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("error rendering markdown: %w", err)
 	}
+
+	out = strings.TrimPrefix(out, "\n")
 
 	if isCode {
 		out = strings.TrimSpace(out)
