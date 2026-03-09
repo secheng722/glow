@@ -195,8 +195,11 @@ func (m model) Init() tea.Cmd {
 			log.Error("unable to read file", "file", m.common.cfg.Path, "error", err)
 			return func() tea.Msg { return errMsg{err} }
 		}
-		body := string(utils.RemoveFrontmatter(content))
-		cmds = append(cmds, renderWithGlamour(m.pager, body))
+
+		// We've loaded the file so we can now render it
+		md := m.pager.currentDocument
+		md.Body = string(content)
+		return func() tea.Msg { return fetchedMarkdownMsg(&md) }
 	}
 
 	return tea.Batch(cmds...)

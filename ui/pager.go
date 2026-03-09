@@ -80,6 +80,7 @@ var (
 type (
 	contentRenderedMsg string
 	reloadMsg          struct{}
+	ScrollToLineMsg    struct{ LineNumber int }
 )
 
 type pagerState int
@@ -185,6 +186,28 @@ func (m pagerModel) update(msg tea.Msg) (pagerModel, tea.Cmd) {
 	)
 
 	switch msg := msg.(type) {
+	case ScrollToLineMsg:
+		if msg.LineNumber <= 0 {
+			msg.LineNumber = 1
+		}
+
+		renderedLines := m.viewport.TotalLineCount()
+		totalSourceLines := strings.Count(m.currentDocument.Body, "\n") + 1
+		percent := float64(msg.LineNumber-1) / float64(totalSourceLines)
+		offset := int(float64(renderedLines) * percent)
+
+		if offset > renderedLines-m.viewport.Height {
+			offset = renderedLines - m.viewport.Height
+		}
+		if offset < 0 {
+			offset = 0
+		}
+		m.viewport.YOffset = offset
+
+		if m.viewport.HighPerformanceRendering {
+			cmds = append(cmds, viewport.Sync(m.viewport))
+		}
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", keyEsc:

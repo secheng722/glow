@@ -2,18 +2,22 @@
 package main
 
 import (
+	"bufio"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/caarlos0/env/v11"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/glamour/styles"
 	"github.com/charmbracelet/glow/v2/ui"
@@ -34,6 +38,7 @@ var (
 
 	readmeNames      = []string{"README.md", "README", "Readme.md", "Readme", "readme.md", "readme"}
 	configFile       string
+	socketPath       string
 	pager            bool
 	tui              bool
 	style            string
@@ -165,6 +170,7 @@ func validateStyle(style string) error {
 func validateOptions(cmd *cobra.Command) error {
 	// grab config values from Viper
 	width = viper.GetUint("width")
+	socketPath = viper.GetString("socket")
 	mouse = viper.GetBool("mouse")
 	pager = viper.GetBool("pager")
 	tui = viper.GetBool("tui")
@@ -341,6 +347,34 @@ func executeCLI(cmd *cobra.Command, src *source, w io.Writer) error {
 	}
 }
 
+func listenOnSocket(socketPath string, p *tea.Program) {
+	_ = os.Remove(socketPath)
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		fmt.Printf("Error creating socket: %v\n", err)
+		return
+	}
+	defer listener.Close()
+
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			fmt.Printf("Error accepting connection: %v\n", err)
+			continue
+		}
+		go func(c net.Conn) {
+			defer c.Close()
+			scanner := bufio.NewScanner(c)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if ln, err := strconv.Atoi(line); err == nil {
+					p.Send(ui.ScrollToLineMsg{LineNumber: ln})
+				}
+			}
+		}(conn)
+	}
+}
+
 func runTUI(path string, content string) error {
 	// Read environment to get debugging stuff
 	cfg, err := env.ParseAs[ui.Config]()
@@ -359,10 +393,23 @@ func runTUI(path string, content string) error {
 	cfg.GlamourMaxWidth = width
 	cfg.EnableMouse = mouse
 	cfg.PreserveNewLines = preserveNewLines
+	cfg.SocketPath = socketPath
+
+	p := ui.NewProgram(cfg, content)
+	if socketPath != "" {
+		go listenOnSocket(socketPath, p)
+	}
 
 	// Run Bubble Tea program
-	if _, err := ui.NewProgram(cfg, content).Run(); err != nil {
+	if _, err := p.Run(); err != nil {
+		if socketPath != "" {
+			_ = os.Remove(socketPath)
+		}
 		return fmt.Errorf("unable to run tui program: %w", err)
+	}
+
+	if socketPath != "" {
+		_ = os.Remove(socketPath)
 	}
 
 	return nil
@@ -395,6 +442,7 @@ func init() {
 
 	// "Glow Classic" cli arguments
 	rootCmd.PersistentFlags().StringVar(&configFile, "config", "", fmt.Sprintf("config file (default %s)", viper.GetViper().ConfigFileUsed()))
+	rootCmd.Flags().StringVar(&socketPath, "socket", "", "unix socket path for line number commands")
 	rootCmd.Flags().BoolVarP(&pager, "pager", "p", false, "display with pager")
 	rootCmd.Flags().BoolVarP(&tui, "tui", "t", false, "display with tui")
 	rootCmd.Flags().StringVarP(&style, "style", "s", styles.AutoStyle, "style name or JSON path")
@@ -407,6 +455,7 @@ func init() {
 
 	// Config bindings
 	_ = viper.BindPFlag("pager", rootCmd.Flags().Lookup("pager"))
+	_ = viper.BindPFlag("socket", rootCmd.Flags().Lookup("socket"))
 	_ = viper.BindPFlag("tui", rootCmd.Flags().Lookup("tui"))
 	_ = viper.BindPFlag("style", rootCmd.Flags().Lookup("style"))
 	_ = viper.BindPFlag("width", rootCmd.Flags().Lookup("width"))
